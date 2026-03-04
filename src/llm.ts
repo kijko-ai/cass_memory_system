@@ -1,10 +1,11 @@
 // src/llm.ts
 // LLM Provider Abstraction - Using Vercel AI SDK
-// Supports OpenAI, Anthropic, and Google providers with a unified interface
+// Supports OpenAI, Anthropic, Google, and Ollama providers with a unified interface
 
 import { createOpenAI } from "@ai-sdk/openai";
 import { createAnthropic } from "@ai-sdk/anthropic";
 import { createGoogleGenerativeAI } from "@ai-sdk/google";
+import { createOllama } from "ollama-ai-provider";
 import { generateObject, type LanguageModel } from "ai";
 import { z } from "zod";
 import type { Config, DiaryEntry } from "./types.js";
@@ -32,7 +33,7 @@ const DEFAULT_LLM_IO: LLMIO = {
 /**
  * Supported LLM provider names
  */
-export type LLMProvider = "openai" | "anthropic" | "google";
+export type LLMProvider = "openai" | "anthropic" | "google" | "ollama";
 
 /**
  * Minimal config interface for LLM operations.
@@ -41,21 +42,26 @@ export interface LLMConfig {
   provider: LLMProvider;
   model: string;
   apiKey?: string;
+  ollamaBaseUrl?: string;
 }
 
 /**
- * Map of provider names to environment variable names
+ * Map of provider names to environment variable names.
+ * Ollama uses OLLAMA_BASE_URL instead of an API key, but is included
+ * here so getAvailableProviders() can detect it.
  */
 const ENV_VAR_MAP: Record<LLMProvider, string> = {
   openai: "OPENAI_API_KEY",
   anthropic: "ANTHROPIC_API_KEY",
   google: "GOOGLE_GENERATIVE_AI_API_KEY",
+  ollama: "OLLAMA_BASE_URL",
 };
 
 /**
- * Expected key prefixes for format validation
+ * Expected key prefixes for format validation.
+ * Ollama has no API key, so no prefix is checked.
  */
-const KEY_PREFIX_MAP: Record<LLMProvider, string> = {
+const KEY_PREFIX_MAP: Record<string, string> = {
   openai: "sk-",
   anthropic: "sk-ant-",
   google: "AIza",
@@ -63,6 +69,11 @@ const KEY_PREFIX_MAP: Record<LLMProvider, string> = {
 
 export function getApiKey(provider: string): string {
   const normalized = provider.trim().toLowerCase() as LLMProvider;
+
+  // Ollama doesn't use an API key — return empty string
+  if (normalized === "ollama") {
+    return "";
+  }
 
   const envVar = ENV_VAR_MAP[normalized];
   if (!envVar) {
@@ -84,6 +95,10 @@ export function getApiKey(provider: string): string {
 
 export function validateApiKey(provider: string): void {
   const normalized = provider.trim().toLowerCase() as LLMProvider;
+
+  // Ollama doesn't use an API key — nothing to validate
+  if (normalized === "ollama") return;
+
   const envVar = ENV_VAR_MAP[normalized];
   if (!envVar) return;
 
@@ -115,8 +130,19 @@ export function validateApiKey(provider: string): void {
   }
 }
 
-export function getModel(config: { provider: string; model: string; apiKey?: string }): LanguageModel {
+export function getModel(config: { provider: string; model: string; apiKey?: string; ollamaBaseUrl?: string }): LanguageModel {
   const provider = config.provider as LLMProvider;
+
+  if (provider === "ollama") {
+    const baseURL = config.ollamaBaseUrl
+      || process.env.OLLAMA_BASE_URL
+      || "http://localhost:11434";
+    // ollama-ai-provider expects baseURL with /api suffix
+    const normalizedBase = baseURL.replace(/\/+$/, "");
+    const apiBase = normalizedBase.endsWith("/api") ? normalizedBase : `${normalizedBase}/api`;
+    return createOllama({ baseURL: apiBase })(config.model);
+  }
+
   const apiKey = config.apiKey || getApiKey(provider);
 
   switch (provider) {
@@ -128,6 +154,12 @@ export function getModel(config: { provider: string; model: string; apiKey?: str
 }
 
 export function isLLMAvailable(provider: LLMProvider): boolean {
+  // Ollama is "available" when explicitly configured via OLLAMA_BASE_URL.
+  // We don't auto-detect a running local server because that would require
+  // a network call, and this function is used synchronously.
+  if (provider === "ollama") {
+    return !!process.env.OLLAMA_BASE_URL;
+  }
   const envVar = ENV_VAR_MAP[provider];
   return !!process.env[envVar];
 }
@@ -432,7 +464,8 @@ export async function generateObjectSafe<T>(
     const llmConfig: LLMConfig = {
       provider: config.provider as LLMProvider,
       model: config.model,
-      apiKey: config.apiKey
+      apiKey: config.apiKey,
+      ollamaBaseUrl: config.ollamaBaseUrl
     };
     model = getModel(llmConfig);
   }
@@ -704,12 +737,13 @@ Make queries specific enough to be useful but broad enough to match variations.`
 
 // --- Multi-Provider Fallback ---
 
-const FALLBACK_ORDER: LLMProvider[] = ["anthropic", "openai", "google"];
+const FALLBACK_ORDER: LLMProvider[] = ["anthropic", "openai", "google", "ollama"];
 
 const FALLBACK_MODELS: Record<LLMProvider, string> = {
   anthropic: "claude-3-5-sonnet-20241022",
   openai: "gpt-4o-mini",
   google: "gemini-1.5-flash",
+  ollama: "llama3.2:3b",
 };
 
 export async function llmWithFallback<T>(
@@ -727,7 +761,10 @@ export async function llmWithFallback<T>(
   const availableProviders = getAvailableProviders();
   const providerOrder: Array<{ provider: LLMProvider; model: string; apiKey?: string }> = [];
 
-  if (availableProviders.includes(primaryProvider) || apiKeyOverride !== undefined) {
+  // Ollama is always considered available when explicitly configured as the primary provider
+  // since it uses a base URL (defaults to localhost:11434) rather than an API key.
+  const primaryIsOllama = primaryProvider === "ollama";
+  if (availableProviders.includes(primaryProvider) || apiKeyOverride !== undefined || primaryIsOllama) {
     providerOrder.push({ provider: primaryProvider, model: primaryModel, apiKey: apiKeyOverride });
   }
 
@@ -739,7 +776,7 @@ export async function llmWithFallback<T>(
 
   if (providerOrder.length === 0) {
     throw new Error(
-      "No LLM providers available. Set one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_GENERATIVE_AI_API_KEY"
+      "No LLM providers available. Set one of: OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, or OLLAMA_BASE_URL"
     );
   }
 
@@ -750,7 +787,7 @@ export async function llmWithFallback<T>(
     const isLastProvider = i === providerOrder.length - 1;
 
     try {
-      const llmModel = getModel({ provider, model, apiKey });
+      const llmModel = getModel({ provider, model, apiKey, ollamaBaseUrl: config.ollamaBaseUrl });
       const costConfig: Config = { ...config, provider, model, apiKey };
 
       const result = await monitoredGenerateObject<T>({

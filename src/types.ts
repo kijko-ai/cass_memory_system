@@ -41,7 +41,7 @@ export type BulletState = z.infer<typeof BulletStateEnum>;
 export const BulletMaturityEnum = z.enum(["candidate", "established", "proven", "deprecated"]);
 export type BulletMaturity = z.infer<typeof BulletMaturityEnum>;
 
-export const LLMProviderEnum = z.enum(["openai", "anthropic", "google"]);
+export const LLMProviderEnum = z.enum(["openai", "anthropic", "google", "ollama"]);
 export type LLMProvider = z.infer<typeof LLMProviderEnum>;
 
 // ============================================================================
@@ -407,6 +407,7 @@ export const ConfigSchema = z.object({
   verbose: z.boolean().default(false),
   jsonOutput: z.boolean().default(false),
   apiKey: z.string().optional(),
+  ollamaBaseUrl: z.string().default("http://localhost:11434"),
   sanitization: SanitizationConfigSchema.default({}),
   budget: BudgetConfigSchema.default({})
 });

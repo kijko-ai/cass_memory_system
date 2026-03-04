@@ -248,8 +248,8 @@ function buildRecommendedActions(params: {
   if (llmCheck?.status === "warn") {
     actions.push({
       label: "Configure an LLM API key (optional)",
-      command: "export ANTHROPIC_API_KEY=\"...\"  # or OPENAI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY",
-      reason: "Enables AI-powered reflection. The CLI works fully without it.",
+      command: "export ANTHROPIC_API_KEY=\"...\"  # or OPENAI_API_KEY / GOOGLE_GENERATIVE_AI_API_KEY / OLLAMA_BASE_URL",
+      reason: "Enables AI-powered reflection. The CLI works fully without it. For local LLMs, use Ollama.",
       urgency: "low",
     });
   }
@@ -384,8 +384,10 @@ async function computeDoctorChecks(
 
   // 3) LLM config (optional - system works without it via graceful degradation)
   const availableProviders = getAvailableProviders();
-  const hasAnyApiKey = availableProviders.length > 0 || !!config.apiKey;
-  const configuredProviderAvailable = isLLMAvailable(config.provider) || !!config.apiKey;
+  // Ollama is available when explicitly configured even without OLLAMA_BASE_URL env var
+  const ollamaConfigured = config.provider === "ollama";
+  const hasAnyApiKey = availableProviders.length > 0 || !!config.apiKey || ollamaConfigured;
+  const configuredProviderAvailable = isLLMAvailable(config.provider) || !!config.apiKey || ollamaConfigured;
 
   let llmMessage: string;
   let llmStatus: CheckStatus = "warn";
@@ -393,12 +395,17 @@ async function computeDoctorChecks(
   if (hasAnyApiKey) {
     llmStatus = "pass";
     if (configuredProviderAvailable) {
-      llmMessage = `Provider: ${config.provider} (ready)`;
+      if (config.provider === "ollama") {
+        const baseUrl = config.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+        llmMessage = `Provider: ollama (${baseUrl})`;
+      } else {
+        llmMessage = `Provider: ${config.provider} (ready)`;
+      }
     } else {
       llmMessage = `Provider: ${config.provider} not configured, but ${availableProviders.join(", ")} available (will auto-fallback)`;
     }
   } else {
-    llmMessage = `No API keys set (optional - set ANTHROPIC_API_KEY, OPENAI_API_KEY, or GOOGLE_GENERATIVE_AI_API_KEY for AI-powered reflection)`;
+    llmMessage = `No API keys set (optional - set ANTHROPIC_API_KEY, OPENAI_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, or OLLAMA_BASE_URL for AI-powered reflection)`;
   }
 
   checks.push({
@@ -792,7 +799,8 @@ export async function runSelfTest(
   const currentProvider = config.provider;
   const hasCurrentProvider = availableProviders.includes(currentProvider);
   const hasConfigApiKey = !!config.apiKey;
-  const hasAnyApiKey = availableProviders.length > 0 || hasConfigApiKey;
+  const isOllamaProvider = currentProvider === "ollama";
+  const hasAnyApiKey = availableProviders.length > 0 || hasConfigApiKey || isOllamaProvider;
 
   if (!hasAnyApiKey) {
     // No API keys from env vars or config
@@ -802,6 +810,24 @@ export async function runSelfTest(
       status: "fail",
       message: "No API keys configured",
       details: { availableProviders: [], currentProvider, keySource: "none" },
+    });
+  } else if (isOllamaProvider) {
+    // Ollama uses a base URL, not an API key
+    const baseUrl = config.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+    checks.push({
+      category: "Self-Test",
+      item: "LLM System",
+      status: "pass",
+      message: `${currentProvider} (${config.model}) @ ${baseUrl}`,
+      details: {
+        availableProviders,
+        currentProvider,
+        model: config.model,
+        ollamaBaseUrl: baseUrl,
+        semanticSearchEnabled: config.semanticSearchEnabled,
+        embeddingModel: config.embeddingModel,
+        keySource: "ollama"
+      },
     });
   } else if (hasConfigApiKey) {
     // API key provided directly in config - this takes precedence

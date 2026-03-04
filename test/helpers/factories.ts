@@ -64,6 +64,7 @@ export function createTestConfig(overrides: Partial<Config> = {}): Config {
     embeddingModel: "Xenova/all-MiniLM-L6-v2",
     verbose: false,
     jsonOutput: false,
+    ollamaBaseUrl: "http://localhost:11434",
     sanitization: {
       enabled: true,
       extraPatterns: [],

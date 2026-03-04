@@ -24,6 +24,7 @@ interface EnvBackup {
   OPENAI_API_KEY?: string;
   ANTHROPIC_API_KEY?: string;
   GOOGLE_GENERATIVE_AI_API_KEY?: string;
+  OLLAMA_BASE_URL?: string;
 }
 
 let envBackup: EnvBackup = {};
@@ -33,6 +34,7 @@ function saveEnv() {
     OPENAI_API_KEY: process.env.OPENAI_API_KEY,
     ANTHROPIC_API_KEY: process.env.ANTHROPIC_API_KEY,
     GOOGLE_GENERATIVE_AI_API_KEY: process.env.GOOGLE_GENERATIVE_AI_API_KEY,
+    OLLAMA_BASE_URL: process.env.OLLAMA_BASE_URL,
   };
 }
 
@@ -50,6 +52,7 @@ function clearAllApiKeys() {
   delete process.env.OPENAI_API_KEY;
   delete process.env.ANTHROPIC_API_KEY;
   delete process.env.GOOGLE_GENERATIVE_AI_API_KEY;
+  delete process.env.OLLAMA_BASE_URL;
 }
 
 // ============================================================================
@@ -107,7 +110,7 @@ describe("getApiKey", () => {
   });
 
   it("includes supported providers in unknown provider error", () => {
-    expect(() => getApiKey("bedrock")).toThrow("Supported providers: openai, anthropic, google");
+    expect(() => getApiKey("bedrock")).toThrow("Supported providers: openai, anthropic, google, ollama");
   });
 });
 
@@ -251,14 +254,17 @@ describe("getAvailableProviders", () => {
   });
 
   it("returns all providers when all keys are set", () => {
+    clearAllApiKeys();
     process.env.OPENAI_API_KEY = "sk-test";
     process.env.ANTHROPIC_API_KEY = "sk-ant-test";
     process.env.GOOGLE_GENERATIVE_AI_API_KEY = "AIzaTest";
+    process.env.OLLAMA_BASE_URL = "http://localhost:11434";
     const providers = getAvailableProviders();
     expect(providers).toContain("openai");
     expect(providers).toContain("anthropic");
     expect(providers).toContain("google");
-    expect(providers.length).toBe(3);
+    expect(providers).toContain("ollama");
+    expect(providers.length).toBe(4);
   });
 });
 
@@ -581,7 +587,7 @@ describe("llmWithFallback", () => {
     const schema = z.object({ test: z.string() });
 
     await expect(llmWithFallback(schema, "test prompt", config)).rejects.toThrow(
-      "OPENAI_API_KEY, ANTHROPIC_API_KEY, or GOOGLE_GENERATIVE_AI_API_KEY"
+      "OPENAI_API_KEY, ANTHROPIC_API_KEY, GOOGLE_GENERATIVE_AI_API_KEY, or OLLAMA_BASE_URL"
     );
   });
 });

@@ -208,6 +208,9 @@ export async function loadConfig(cliOverrides: Partial<Config> = {}): Promise<Co
   if (process.env.CASS_PATH) {
     envOverrides.cassPath = process.env.CASS_PATH;
   }
+  if (process.env.OLLAMA_BASE_URL) {
+    envOverrides.ollamaBaseUrl = process.env.OLLAMA_BASE_URL;
+  }
 
   const globalExtra = (globalConfig as any)?.sanitization?.extraPatterns;
   const cliExtra = (cliOverrides as any)?.sanitization?.extraPatterns;
