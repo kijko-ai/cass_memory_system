@@ -813,7 +813,7 @@ export async function runSelfTest(
     });
   } else if (isOllamaProvider) {
     // Ollama uses a base URL, not an API key
-    const baseUrl = config.ollamaBaseUrl || process.env.OLLAMA_BASE_URL || "http://localhost:11434";
+    const baseUrl = resolveOllamaBaseUrl(config.ollamaBaseUrl);
     checks.push({
       category: "Self-Test",
       item: "LLM System",
